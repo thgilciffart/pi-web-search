@@ -30,29 +30,31 @@ interface WebSearchToolDetails {
 }
 
 const SearchParams = Type.Object({
-	query: Type.String({ description: "The search query. Be specific; avoid full sentences unless quoting." }),
+	query: Type.String({
+		description: "The search query. Use specific terms. Do not write a full sentence unless you quote text.",
+	}),
 	provider: Type.Optional(
 		StringEnum(PROVIDER_ORDER, {
-			description: "Search provider to use. Omit to use the default (first configured provider).",
+			description: "The search provider to use. Omit this parameter to use the default provider.",
 		}),
 	),
 	max_results: Type.Optional(
 		Type.Number({
 			minimum: 1,
 			maximum: MAX_RESULTS_HARD_CAP,
-			description: "Maximum number of results (default 5).",
+			description: "The maximum number of results to return. The default is 5.",
 		}),
 	),
 	time_range: Type.Optional(
 		StringEnum(["day", "week", "month", "year"] as const, {
-			description: "Restrict results to this recency window, when the provider supports it.",
+			description: "Restrict results to this time window. Not every provider supports this parameter.",
 		}),
 	),
 	include_domains: Type.Optional(
-		Type.Array(Type.String(), { description: "Only return results from these domains." }),
+		Type.Array(Type.String(), { description: "Return results only from these domains." }),
 	),
 	exclude_domains: Type.Optional(
-		Type.Array(Type.String(), { description: "Exclude results from these domains." }),
+		Type.Array(Type.String(), { description: "Do not return results from these domains." }),
 	),
 });
 
@@ -79,11 +81,13 @@ function formatResultsForModel(
 	if (notice) lines.push(notice);
 	if (results.length === 0) {
 		lines.push(`No results found for "${query}" (provider: ${provider}).`);
-		lines.push("Consider rephrasing the query, widening the time range, or removing domain filters.");
+		lines.push("Try a different query, a wider time window, or fewer domain filters.");
 		return lines.join("\n");
 	}
 
-	lines.push(`Web search results for "${query}" — provider: ${provider}, ${results.length} result(s):`);
+	lines.push(
+		`Web search results for "${query}" (provider: ${provider}, ${results.length} ${results.length === 1 ? "result" : "results"}):`,
+	);
 	lines.push("");
 	for (let i = 0; i < results.length; i++) {
 		const result = results[i];
@@ -101,19 +105,27 @@ function formatResultsForModel(
 
 function buildToolDescription(settings: WebSearchSettings, configured: Set<string>): string {
 	const providerLines = PROVIDER_ORDER.map((name) => {
-		const envHint = PROVIDER_ENV_VARS[name].length > 0 ? ` — set ${PROVIDER_ENV_VARS[name][0]}` : " — no key needed";
-		const status = configured.has(name) ? "available" : "not configured";
-		return `- ${name} (${status})${envHint}`;
+		const envVars = PROVIDER_ENV_VARS[name];
+		if (configured.has(name)) {
+			const suffix = envVars.length === 0 ? ". No key needed." : ".";
+			return `- ${name}: available${suffix}`;
+		}
+		if (envVars.length === 0) {
+			return `- ${name}: not configured.`;
+		}
+		return `- ${name}: not configured. Set ${envVars.join(" or ")}.`;
 	}).join("\n");
 
 	return [
-		"Search the web and return a list of results (title, URL, snippet, and extracted content when available).",
-		"Use this tool for anything involving current events, recent releases, documentation you are unsure about, or facts beyond your training data.",
+		"Search the web. Return a list of results. Each result has a title, a URL, and a snippet. Some results also include extracted content.",
+		"",
+		"Use this tool when you need facts beyond your training data. Examples: current events, recent releases, and documentation you are unsure about.",
 		"",
 		"Providers:",
 		providerLines,
 		"",
-		"The `provider` parameter is optional: it defaults to the first configured provider and falls back to the next available one on failure.",
+		"The `provider` parameter is optional. When you omit it, the tool uses the first provider that has a key.",
+		"When that provider fails, the tool retries with the next configured providers. It tries at most three providers in total.",
 	].join("\n");
 }
 
@@ -190,7 +202,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
 			if (!params.query.trim()) {
 				return {
-					content: [{ type: "text", text: "Error: query must not be empty." }],
+					content: [{ type: "text", text: "Error: the query must not be empty." }],
 					details: { provider: "none", query: "", resultCount: 0, results: [] },
 					isError: true,
 				};
@@ -207,9 +219,9 @@ export default function (pi: ExtensionAPI) {
 							text:
 								`Provider "${params.provider}" is not configured. ` +
 								(envHint.length
-									? `Set ${envHint.join(" or ")} or add it to ~/.pi/agent/web-search/config.json, then restart pi. `
+									? `Set the environment variable ${envHint.join(" or ")}, or configure the provider in ~/.pi/agent/web-search/config.json. Then restart pi. `
 									: "") +
-								`Available providers: ${[...configuredNames].join(", ")}.`,
+								`Configured providers: ${[...configuredNames].join(", ")}.`,
 						},
 					],
 					details: { provider: params.provider, query: params.query, resultCount: 0, results: [] },
@@ -236,7 +248,7 @@ export default function (pi: ExtensionAPI) {
 				);
 
 				const notice = fallbackFrom
-					? `Note: ${fallbackFrom} failed; fell back to ${provider.name}.`
+					? `Note: provider ${fallbackFrom} failed. The tool retried with ${provider.name}.`
 					: undefined;
 
 				const details: WebSearchToolDetails = {
@@ -280,7 +292,7 @@ export default function (pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `Web search failed. ${message}\nTry another provider, or check API keys and network access.`,
+							text: `Web search failed. ${message}\nTry a different provider. Check the API keys and the network connection.`,
 						},
 					],
 					details: { provider: params.provider ?? defaultProvider ?? "unknown", query: params.query, resultCount: 0, results: [] },
@@ -311,7 +323,7 @@ export default function (pi: ExtensionAPI) {
 				theme.fg("muted", `${details.resultCount} result(s) via `) +
 				theme.fg("accent", details.provider);
 			if (details.fallbackFrom) {
-				text += theme.fg("dim", ` (fell back from ${details.fallbackFrom})`);
+				text += theme.fg("dim", ` (previous provider ${details.fallbackFrom} failed)`);
 			}
 
 			const display = expanded ? details.results : details.results.slice(0, 3);
@@ -342,20 +354,21 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			if (!query) {
-				const lines: string[] = [];
+				const lines: string[] = ["✓ = available, ○ = not configured"];
 				for (const name of PROVIDER_ORDER) {
-					const configured = configuredNames.has(name);
-					const envHint = PROVIDER_ENV_VARS[name][0]
-						? ` (${PROVIDER_ENV_VARS[name].join(" | ")})`
-						: " (no key needed)";
-					const mark = configured ? "✓" : "○";
-					lines.push(`${mark} ${name}${configured ? "" : envHint}`);
+					const envVars = PROVIDER_ENV_VARS[name];
+					if (configuredNames.has(name)) {
+						lines.push(`✓ ${name}`);
+					} else if (envVars.length > 0) {
+						lines.push(`○ ${name}: set ${envVars.join(" or ")}`);
+					} else {
+						lines.push(`○ ${name}`);
+					}
 				}
 				lines.push("");
+				lines.push(`Default provider: ${defaultProvider ?? "none"}.`);
 				lines.push(
-					`Default provider: ${defaultProvider ?? "none"}. Config files: ${
-						settings.configFiles.length ? settings.configFiles.join(", ") : "none found"
-					}`,
+					`Config files found: ${settings.configFiles.length ? settings.configFiles.join(", ") : "none"}.`,
 				);
 				report(`Web search providers:\n${lines.join("\n")}`);
 				return;

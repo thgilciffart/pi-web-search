@@ -91,11 +91,11 @@ export async function fetchJson<T>(provider: string, options: HttpOptions): Prom
 				const timer = setTimeout(resolve, 1_200);
 				const onAbort = () => {
 					clearTimeout(timer);
-					reject(new ProviderError(provider, "aborted"));
+					reject(new ProviderError(provider, "request aborted"));
 				};
 				if (signal?.aborted) {
 					clearTimeout(timer);
-					reject(new ProviderError(provider, "aborted"));
+					reject(new ProviderError(provider, "request aborted"));
 					return;
 				}
 				signal?.addEventListener("abort", onAbort, { once: true });
@@ -124,13 +124,13 @@ export async function fetchJson<T>(provider: string, options: HttpOptions): Prom
 			return (await response.json()) as T;
 		} catch (error) {
 			if (error instanceof ProviderError) {
-				if (error.message === "aborted") throw error;
+				if (error.message === "request aborted") throw error;
 				lastError = error;
 				if (error.status && !RETRYABLE_STATUS.has(error.status)) throw error;
 				continue;
 			}
 			if (error instanceof Error && error.name === "AbortError") {
-				throw new ProviderError(provider, signal?.aborted ? "aborted" : `timed out after ${timeoutMs}ms`);
+				throw new ProviderError(provider, signal?.aborted ? "request aborted" : `request timed out after ${timeoutMs} ms`);
 			}
 			lastError = new ProviderError(provider, error instanceof Error ? error.message : String(error));
 			continue;
@@ -175,7 +175,7 @@ export async function fetchText(provider: string, options: HttpOptions): Promise
 				continue;
 			}
 			if (error instanceof Error && error.name === "AbortError") {
-				throw new ProviderError(provider, signal?.aborted ? "aborted" : `timed out after ${timeoutMs}ms`);
+				throw new ProviderError(provider, signal?.aborted ? "request aborted" : `request timed out after ${timeoutMs} ms`);
 			}
 			if (attempt > 0) {
 				throw new ProviderError(provider, error instanceof Error ? error.message : String(error));

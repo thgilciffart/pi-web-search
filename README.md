@@ -1,6 +1,6 @@
 # pi-web-search
 
-A [pi](https://github.com/earendil-works/pi) extension that gives the coding agent a `web_search` tool backed by ten search providers, with automatic provider selection and fallback.
+A [pi](https://github.com/earendil-works/pi) extension that gives the coding agent a `web_search` tool. The tool supports ten search providers. It selects a provider automatically, and it retries with another provider when one fails.
 
 ```
 ┌─ web_search "latest TypeScript version" [tavily]
@@ -21,12 +21,12 @@ A [pi](https://github.com/earendil-works/pi) extension that gives the coding age
 | `exa` | `EXA_API_KEY` | Neural/semantic search, returns page text |
 | `perplexity` | `PERPLEXITY_API_KEY` | Perplexity Search API, $5/1K flat |
 | `youcom` | `YDC_API_KEY` | You.com Web Search API, web + news, query-relevant highlights |
-| `parallel` | `PARALLEL_API_KEY` | Proprietary index, very fast, dense excerpts |
+| `parallel` | `PARALLEL_API_KEY` | Proprietary index, low latency, dense excerpts |
 | `linkup` | `LINKUP_API_KEY` | Fast web search, EU-based |
-| `searxng` | `SEARXNG_URL` | Self-hosted metasearch; set the instance base URL |
-| `duckduckgo` | — | No key needed. Unofficial HTML endpoint, best-effort; may be rate-limited or bot-challenged on some networks |
+| `searxng` | `SEARXNG_URL` | Self-hosted metasearch. Set the instance base URL. |
+| `duckduckgo` | — | No key needed. Unofficial HTML endpoint, best effort. Some networks may rate-limit it or show a bot challenge. |
 
-Every provider is optional. The tool works with any subset — with no keys at all it falls back to DuckDuckGo.
+Every provider is optional. The tool works with any subset. When you set no key, the tool uses DuckDuckGo.
 
 ## Installation
 
@@ -72,8 +72,8 @@ Set the env var for each provider you want enabled (see table). Env vars overrid
 }
 ```
 
-- `defaultProvider` — used when a tool call doesn't name one. Defaults to the first configured provider in the table order above.
-- `fallbackOrder` — array of provider names controlling auto-selection and fallback order.
+- `defaultProvider` — the provider the tool uses when a call does not name one. Defaults to the first provider that has a key, in table order.
+- `fallbackOrder` — array of provider names that controls auto-selection and retry order.
 - `maxResults` — default result count (default 5, max 20).
 - Per-provider extras: `parallel.mode` (`turbo`/`fast`/`basic`/`advanced`), `linkup.depth` (`flash`/`fast`/`standard`/`deep`), `exa.type`, `serper.gl`/`serper.hl` (locale), `perplexity.contextSize`, `youcom.highlights`.
 
@@ -92,13 +92,13 @@ Parameters:
 
 Behavior:
 
-- **Fallback** — when the provider isn't specified and fails, the tool automatically retries with the next configured provider (up to two fallbacks) and notes which provider answered.
-- **Explicit provider** — naming a provider disables fallback; if it isn't configured, the result explains which env var to set.
+- **Retry** — when a call does not name a provider and the default provider fails, the tool retries with the next configured providers. It tries at most three providers in total. The result names the provider that answered.
+- **Explicit provider** — a named provider disables retry. When the named provider is not configured, the result explains which environment variable to set.
 - **Structured output** — results carry a `structuredContent` payload (`provider`, `query`, `results[]`) for codemode/programmatic callers.
 
 ## The `/websearch` command
 
-- `/websearch` — status: which providers are configured, the default provider, and config file locations.
+- `/websearch` — status: which providers are available, the default provider, and config file locations.
 - `/websearch <query>` — runs a quick 3-result test search with the default provider.
 
 ## Development
@@ -110,7 +110,7 @@ bun run typecheck
 bun test
 ```
 
-The extension is plain TypeScript loaded via pi's jiti runtime — no build step. Try it live:
+The extension is plain TypeScript. Pi loads it through its jiti runtime, so you need no build step. Try it live:
 
 ```bash
 pi -e ./src/index.ts

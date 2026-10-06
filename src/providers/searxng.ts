@@ -73,7 +73,7 @@ export function createSearxngProvider(config: ProviderConfig): SearchProvider {
 				if (error instanceof ProviderError && error.status === 403) {
 					throw new ProviderError(
 						"searxng",
-						`instance at ${baseUrl} refused JSON output (403); enable the "json" format on the instance or pick one that allows it`,
+						`The SearXNG instance at ${baseUrl} refused JSON output (HTTP 403). Enable the JSON format on the instance, or use an instance that allows it.`,
 						403,
 					);
 				}

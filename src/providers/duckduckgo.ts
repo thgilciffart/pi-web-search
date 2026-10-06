@@ -123,13 +123,16 @@ export function createDuckDuckGoProvider(_config: ProviderConfig): SearchProvide
 			if (html.includes("anomaly") || html.includes("challenge")) {
 				throw new ProviderError(
 					"duckduckgo",
-					"DuckDuckGo is serving a bot challenge for this network; try another provider",
+					"DuckDuckGo returned a bot challenge for this network. Try a different provider.",
 				);
 			}
 
 			const results = parseDuckDuckGoHtml(html);
 			if (results.length === 0 && !/<form[^>]*action="[^"]*"/.test(html)) {
-				throw new ProviderError("duckduckgo", "unrecognized response; DuckDuckGo HTML may have changed");
+				throw new ProviderError(
+					"duckduckgo",
+					"DuckDuckGo returned a response the parser does not recognize. The page format may have changed.",
+				);
 			}
 			return results.slice(0, query.maxResults);
 		},
