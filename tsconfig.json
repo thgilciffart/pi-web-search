@@ -1,0 +1,20 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"lib": ["ES2022"],
+		"types": ["node"],
+		"strict": true,
+		"noEmit": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"paths": {
+			"typebox": ["../.pi-types/typebox/build/index.d.mts"],
+			"@earendil-works/pi-ai": ["../.pi-types/pi-ai/dist/index.d.ts"],
+			"@earendil-works/pi-coding-agent": ["../.pi-types/pi-coding-agent/dist/index.d.ts"],
+			"@earendil-works/pi-tui": ["../.pi-types/pi-tui/dist/index.d.ts"]
+		}
+	},
+	"include": ["src"]
+}
