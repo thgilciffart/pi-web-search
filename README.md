@@ -1,6 +1,8 @@
-# pi-web-search
+# pi-websearch
 
 A [pi](https://github.com/earendil-works/pi) extension that gives the coding agent a `web_search` tool. The tool supports ten search providers. It selects a provider automatically, and it retries with another provider when one fails.
+
+The tool calls each search API directly. A search costs the API price, not model tokens. This differs from provider-native search plugins, which route the search through the LLM provider.
 
 ```
 ┌─ web_search "latest TypeScript version" [tavily]
@@ -31,6 +33,9 @@ Every provider is optional. The tool works with any subset. When you set no key,
 ## Installation
 
 ```bash
+# from npm (also listed at https://pi.dev/packages)
+pi install npm:pi-websearch
+
 # from this repo
 pi install git:github.com/thgilciffart/pi-web-search
 
