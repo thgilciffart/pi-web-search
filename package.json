@@ -1,5 +1,5 @@
 {
-	"name": "pi-websearch",
+	"name": "@thgilciffart/pi-websearch",
 	"version": "0.1.0",
 	"description": "Web search tool for the pi coding agent — one web_search tool, 10 providers (Tavily, Brave, Serper, Exa, Perplexity, You.com, Parallel, Linkup, SearXNG, DuckDuckGo) with automatic provider fallback. Calls search APIs directly, so a search costs the API price, not model tokens.",
 	"type": "module",

@@ -34,7 +34,7 @@ Every provider is optional. The tool works with any subset. When you set no key,
 
 ```bash
 # from npm (also listed at https://pi.dev/packages)
-pi install npm:pi-websearch
+pi install npm:@thgilciffart/pi-websearch
 
 # from this repo
 pi install git:github.com/thgilciffart/pi-web-search
