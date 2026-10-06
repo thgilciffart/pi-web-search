@@ -1,8 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { effectiveFallbackOrder, pickDefaultProvider, resolveSettings } from "../src/config.js";
+import {
+	disabledProviderNames,
+	effectiveFallbackOrder,
+	ensureConfigFile,
+	pickDefaultProvider,
+	resolveSettings,
+} from "../src/config.js";
 import { buildProviders, PROVIDER_ORDER } from "../src/providers/index.js";
 import { parseDuckDuckGoHtml, unwrapDuckUrl } from "../src/providers/duckduckgo.js";
 import { truncate, decodeHtmlEntities } from "../src/providers/types.js";
@@ -91,7 +97,7 @@ describe("config resolution", () => {
 	});
 
 	test("project config file provides keys and defaults", () => {
-		withEnv({ TAVILY_API_KEY: undefined, SEARXNG_URL: undefined });
+		withEnv({ TAVILY_API_KEY: undefined, BRAVE_SEARCH_API_KEY: undefined, SEARXNG_URL: undefined });
 		const dir = makeProjectDir({
 			defaultProvider: "brave",
 			maxResults: 8,
@@ -129,6 +135,58 @@ describe("config resolution", () => {
 		expect(pickDefaultProvider(settings, ["brave", "duckduckgo"])).toBe("brave");
 		restoreEnv();
 	});
+
+	test("enabled: false disables a provider even when a key is present", () => {
+		withEnv({ TAVILY_API_KEY: "tvly-test", BRAVE_SEARCH_API_KEY: undefined });
+		const dir = makeProjectDir({ providers: { tavily: { enabled: false } } });
+		const settings = resolveSettings(dir);
+		// The env key is still resolved, but the provider stays disabled.
+		expect(settings.providers.tavily?.apiKey).toBe("tvly-test");
+		expect(settings.providers.tavily?.enabled).toBe(false);
+		expect(disabledProviderNames(settings).has("tavily")).toBe(true);
+		expect(buildProviders(settings.providers).map((p) => p.name)).not.toContain("tavily");
+		restoreEnv();
+	});
+
+	test("disabled providers are excluded from default and fallback selection", () => {
+		withEnv({ TAVILY_API_KEY: "tvly-test", BRAVE_SEARCH_API_KEY: "brave-test" });
+		const dir = makeProjectDir({ providers: { tavily: { enabled: false } } });
+		const settings = resolveSettings(dir);
+		expect(effectiveFallbackOrder(settings)).not.toContain("tavily");
+		// Tavily would normally win, but brave is now the first usable provider.
+		expect(pickDefaultProvider(settings, ["brave", "duckduckgo"])).toBe("brave");
+		expect(pickDefaultProvider(settings, ["tavily", "brave"])).toBe("brave");
+		restoreEnv();
+	});
+
+	test("duckduckgo can be disabled, leaving no fallback default", () => {
+		const dir = makeProjectDir({ providers: { duckduckgo: { enabled: false } } });
+		const settings = resolveSettings(dir);
+		expect(pickDefaultProvider(settings, [])).toBeUndefined();
+	});
+
+	test("ensureConfigFile creates a pre-populated template and leaves existing files alone", () => {
+		const dir = mkdtempSync(join(tmpdir(), "pi-web-search-cfg-"));
+		tempDirs.push(dir);
+		const path = join(dir, "nested", "config.json");
+
+		expect(ensureConfigFile(path)).toBe(true);
+		const created = JSON.parse(readFileSync(path, "utf8")) as {
+			providers: Record<string, { enabled?: boolean }>;
+		};
+		for (const name of PROVIDER_ORDER) {
+			expect(created.providers[name]).toBeDefined();
+			expect(created.providers[name].enabled).toBe(true);
+		}
+
+		writeFileSync(path, JSON.stringify({ providers: { tavily: { enabled: false, apiKey: "x" } } }));
+		expect(ensureConfigFile(path)).toBe(false);
+		const untouched = JSON.parse(readFileSync(path, "utf8")) as {
+			providers: Record<string, { enabled?: boolean; apiKey?: string }>;
+		};
+		expect(untouched.providers.tavily.enabled).toBe(false);
+		expect(untouched.providers.tavily.apiKey).toBe("x");
+	});
 });
 
 describe("provider registry", () => {
@@ -142,6 +200,15 @@ describe("provider registry", () => {
 		expect(names).not.toContain("brave");
 		expect(names).toContain("duckduckgo");
 		expect(names).toHaveLength(2);
+	});
+
+	test("buildProviders skips disabled providers even with credentials", () => {
+		const providers = buildProviders({
+			tavily: { apiKey: "tvly-x", enabled: false },
+			searxng: { baseUrl: "http://localhost:8080", enabled: false },
+			brave: { apiKey: "brave-x" },
+		});
+		expect(providers.map((p) => p.name)).toEqual(["brave", "duckduckgo"]);
 	});
 
 	test("registry covers every provider in PROVIDER_ORDER", () => {

@@ -13,7 +13,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { effectiveFallbackOrder, pickDefaultProvider, resolveSettings, type WebSearchSettings } from "./config.js";
+import { effectiveFallbackOrder, disabledProviderNames, ensureConfigFile, globalConfigPath, pickDefaultProvider, resolveSettings, type WebSearchSettings } from "./config.js";
 import { buildProviders, PROVIDER_ENV_VARS, PROVIDER_ORDER, type ProviderName } from "./providers/index.js";
 import { ProviderError, truncate, type SearchProvider, type WebResult } from "./providers/types.js";
 
@@ -103,9 +103,16 @@ function formatResultsForModel(
 	return lines.join("\n").trimEnd();
 }
 
-function buildToolDescription(settings: WebSearchSettings, configured: Set<string>): string {
+function buildToolDescription(
+	settings: WebSearchSettings,
+	configured: Set<string>,
+	disabled: Set<string>,
+): string {
 	const providerLines = PROVIDER_ORDER.map((name) => {
 		const envVars = PROVIDER_ENV_VARS[name];
+		if (disabled.has(name)) {
+			return `- ${name}: disabled in the config file.`;
+		}
 		if (configured.has(name)) {
 			const suffix = envVars.length === 0 ? ". No key needed." : ".";
 			return `- ${name}: available${suffix}`;
@@ -124,16 +131,19 @@ function buildToolDescription(settings: WebSearchSettings, configured: Set<strin
 		"Providers:",
 		providerLines,
 		"",
-		"The `provider` parameter is optional. When you omit it, the tool uses the first provider that has a key.",
+		"The `provider` parameter is optional. When you omit it, the tool uses the first provider that has a key. Providers disabled in the config file are never used.",
 		"When that provider fails, the tool retries with the next configured providers. It tries at most three providers in total.",
 	].join("\n");
 }
 
 export default function (pi: ExtensionAPI) {
+	// Create the global config file with every provider pre-populated on first run.
+	ensureConfigFile();
 	const settings = resolveSettings();
 	const providers = buildProviders(settings.providers);
 	const providerByName = new Map(providers.map((p) => [p.name, p]));
 	const configuredNames = new Set(providers.map((p) => p.name));
+	const disabledNames = disabledProviderNames(settings);
 	const defaultProvider = pickDefaultProvider(settings, [...configuredNames]);
 	const fallbackOrder = effectiveFallbackOrder(settings);
 
@@ -154,7 +164,13 @@ export default function (pi: ExtensionAPI) {
 		if (provider) {
 			chain.push(provider);
 		} else {
-			const primary = defaultProvider ?? "duckduckgo";
+			const primary = defaultProvider;
+			if (!primary) {
+				throw new ProviderError(
+					"web-search",
+					"No search provider is configured. Set an API key, or enable a provider in the config file.",
+				);
+			}
 			chain.push(primary);
 			for (const name of fallbackOrder) {
 				if (chain.length >= 3) break;
@@ -188,7 +204,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "web_search",
 		label: "Web Search",
-		description: buildToolDescription(settings, configuredNames),
+		description: buildToolDescription(settings, configuredNames, disabledNames),
 		promptSnippet: "Search the web for current information.",
 		parameters: SearchParams,
 		outputSchema: SearchOutput,
@@ -208,10 +224,28 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			// Explicitly requesting an unconfigured provider is a setup problem,
-			// not a search failure: tell the model how to fix it.
+			// Explicitly requesting a disabled or unconfigured provider is a setup
+			// problem, not a search failure: tell the model how to fix it.
 			if (params.provider && !providerByName.has(params.provider)) {
+				if (disabledNames.has(params.provider)) {
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`Provider "${params.provider}" is disabled in the web search config file. ` +
+									`Set "enabled": true for it in ${globalConfigPath()}, then restart pi. ` +
+									`Configured providers: ${[...configuredNames].join(", ") || "none"}.`,
+							},
+						],
+						details: { provider: params.provider, query: params.query, resultCount: 0, results: [] },
+						isError: true,
+					};
+				}
 				const envHint = PROVIDER_ENV_VARS[params.provider];
+				const disabledHint = disabledNames.size
+					? ` Disabled in config: ${[...disabledNames].join(", ")}.`
+					: "";
 				return {
 					content: [
 						{
@@ -219,9 +253,9 @@ export default function (pi: ExtensionAPI) {
 							text:
 								`Provider "${params.provider}" is not configured. ` +
 								(envHint.length
-									? `Set the environment variable ${envHint.join(" or ")}, or configure the provider in ~/.pi/agent/web-search/config.json. Then restart pi. `
+									? `Set the environment variable ${envHint.join(" or ")}, or configure the provider in ${globalConfigPath()}. Then restart pi. `
 									: "") +
-								`Configured providers: ${[...configuredNames].join(", ")}.`,
+								`Configured providers: ${[...configuredNames].join(", ") || "none"}.${disabledHint}`,
 						},
 					],
 					details: { provider: params.provider, query: params.query, resultCount: 0, results: [] },
@@ -354,10 +388,12 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			if (!query) {
-				const lines: string[] = ["✓ = available, ○ = not configured"];
+				const lines: string[] = ["✓ = available, ○ = not configured, ✗ = disabled"];
 				for (const name of PROVIDER_ORDER) {
 					const envVars = PROVIDER_ENV_VARS[name];
-					if (configuredNames.has(name)) {
+					if (disabledNames.has(name)) {
+						lines.push(`✗ ${name}: disabled in the config file`);
+					} else if (configuredNames.has(name)) {
 						lines.push(`✓ ${name}`);
 					} else if (envVars.length > 0) {
 						lines.push(`○ ${name}: set ${envVars.join(" or ")}`);

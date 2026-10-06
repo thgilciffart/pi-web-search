@@ -30,6 +30,8 @@ export interface WebResult {
 
 /** Provider-specific credentials and options resolved from env vars and config files. */
 export interface ProviderConfig {
+	/** When false, the provider is never used, even when credentials are present. */
+	enabled?: boolean;
 	/** API key (not required for DuckDuckGo; SearXNG usually runs without one). */
 	apiKey?: string;
 	/** Base URL override (used by SearXNG, optionally others). */

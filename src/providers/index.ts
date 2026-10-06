@@ -71,7 +71,7 @@ const FACTORIES: Record<ProviderName, ProviderFactory> = {
 };
 
 /**
- * Builds all providers that have credentials configured.
+ * Builds all providers that have credentials configured and are not disabled.
  * Key sources (env var wins over config file) are merged per provider.
  */
 export function buildProviders(
@@ -79,9 +79,9 @@ export function buildProviders(
 ): SearchProvider[] {
 	const providers: SearchProvider[] = [];
 	for (const name of PROVIDER_ORDER) {
-		const factory = FACTORIES[name];
 		const config = providerConfigs[name] ?? {};
-		const provider = safeCreate(name, factory, config);
+		if (config.enabled === false) continue;
+		const provider = safeCreate(name, FACTORIES[name], config);
 		if (provider) providers.push(provider);
 	}
 	return providers;

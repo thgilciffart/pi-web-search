@@ -57,18 +57,18 @@ Set the env var for each provider you want enabled (see table). Env vars overrid
 
 ### Config file
 
-`~/.pi/agent/web-search/config.json` (global) or `.pi/web-search.json` (project, takes precedence):
+On first run the extension creates `~/.pi/agent/web-search/config.json` with every provider pre-populated, so all options are visible and editable without digging through docs. Existing files are never overwritten. A `.pi/web-search.json` file in the project takes precedence over the global file:
 
 ```json
 {
 	"defaultProvider": "brave",
 	"maxResults": 8,
 	"providers": {
-		"tavily": { "apiKey": "tvly-..." },
-		"brave": { "apiKey": "BSA-..." },
-		"searxng": { "baseUrl": "http://localhost:8080" },
-		"parallel": { "apiKey": "...", "mode": "advanced" },
-		"linkup": { "apiKey": "...", "depth": "standard" },
+		"tavily": { "enabled": true, "apiKey": "tvly-..." },
+		"brave": { "enabled": true, "apiKey": "BSA-..." },
+		"searxng": { "enabled": true, "baseUrl": "http://localhost:8080" },
+		"parallel": { "enabled": true, "apiKey": "...", "mode": "advanced" },
+		"linkup": { "enabled": false, "apiKey": "..." },
 		"youcom": { "apiKey": "...", "highlights": false },
 		"exa": { "apiKey": "...", "type": "fast" },
 		"serper": { "apiKey": "...", "gl": "us", "hl": "en" },
@@ -77,8 +77,9 @@ Set the env var for each provider you want enabled (see table). Env vars overrid
 }
 ```
 
-- `defaultProvider` — the provider the tool uses when a call does not name one. Defaults to the first provider that has a key, in table order.
-- `fallbackOrder` — array of provider names that controls auto-selection and retry order.
+- `enabled` — set to `false` to disable a provider. A disabled provider is never used, even when an API key is present (in the config file or in an environment variable).
+- `defaultProvider` — the provider the tool uses when a call does not name one. Defaults to the first enabled provider that has a key, in table order. Leave it as `"auto"` (the generated default) to keep automatic selection.
+- `fallbackOrder` — array of provider names that controls auto-selection and retry order. Disabled providers are omitted.
 - `maxResults` — default result count (default 5, max 20).
 - Per-provider extras: `parallel.mode` (`turbo`/`fast`/`basic`/`advanced`), `linkup.depth` (`flash`/`fast`/`standard`/`deep`), `exa.type`, `serper.gl`/`serper.hl` (locale), `perplexity.contextSize`, `youcom.highlights`.
 
@@ -98,12 +99,13 @@ Parameters:
 Behavior:
 
 - **Retry** — when a call does not name a provider and the default provider fails, the tool retries with the next configured providers. It tries at most three providers in total. The result names the provider that answered.
-- **Explicit provider** — a named provider disables retry. When the named provider is not configured, the result explains which environment variable to set.
+- **Explicit provider** — a named provider disables retry. When the named provider is not configured or is disabled, the result explains how to enable it.
+- **Disabled providers** — a provider with `"enabled": false` is never selected, never used as a fallback, and rejected when named explicitly.
 - **Structured output** — results carry a `structuredContent` payload (`provider`, `query`, `results[]`) for codemode/programmatic callers.
 
 ## The `/websearch` command
 
-- `/websearch` — status: which providers are available, the default provider, and config file locations.
+- `/websearch` — status: which providers are available, not configured, or disabled, the default provider, and config file locations.
 - `/websearch <query>` — runs a quick 3-result test search with the default provider.
 
 ## Development

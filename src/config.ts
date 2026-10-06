@@ -8,14 +8,18 @@
  *   "providers": {
  *     "brave": { "apiKey": "..." },
  *     "searxng": { "baseUrl": "http://localhost:8080" },
- *     "parallel": { "apiKey": "...", "mode": "advanced" }
+ *     "parallel": { "apiKey": "...", "mode": "advanced" },
+ *     "linkup": { "enabled": false }
  *   }
  * }
+ *
+ * The global config file is created with every provider pre-populated on first
+ * run, so users can see all options and disable providers with "enabled": false.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { PROVIDER_ENV_VARS, PROVIDER_ORDER, type ProviderName } from "./providers/index.js";
 import type { ProviderConfig, TimeRange } from "./providers/types.js";
 
@@ -45,8 +49,30 @@ function readJsonFile(path: string): Record<string, unknown> | undefined {
 	}
 }
 
+/** Absolute path of the global web-search config file. */
+export function globalConfigPath(): string {
+	return join(homedir(), ".pi", "agent", "web-search", "config.json");
+}
+
 function isProviderName(value: string): value is ProviderName {
 	return (PROVIDER_ORDER as readonly string[]).includes(value);
+}
+
+/** True when a provider is explicitly disabled with "enabled": false. */
+export function isProviderDisabled(
+	providers: Partial<Record<ProviderName, ProviderConfig>>,
+	name: ProviderName,
+): boolean {
+	return providers[name]?.enabled === false;
+}
+
+/** Names of all providers explicitly disabled in the resolved config. */
+export function disabledProviderNames(settings: WebSearchSettings): Set<ProviderName> {
+	const disabled = new Set<ProviderName>();
+	for (const name of PROVIDER_ORDER) {
+		if (isProviderDisabled(settings.providers, name)) disabled.add(name);
+	}
+	return disabled;
 }
 
 function normalizeProviderConfigs(
@@ -86,7 +112,7 @@ function envApiKey(name: ProviderName): string | undefined {
  * @param cwd project directory checked for .pi/web-search.json
  */
 export function resolveSettings(cwd: string = process.cwd()): WebSearchSettings {
-	const globalPath = join(homedir(), ".pi", "agent", "web-search", "config.json");
+	const globalPath = globalConfigPath();
 	const projectPath = resolve(cwd, ".pi", "web-search.json");
 
 	const global = readJsonFile(globalPath);
@@ -127,12 +153,14 @@ export function resolveSettings(cwd: string = process.cwd()): WebSearchSettings 
 	return settings;
 }
 
-/** Effective fallback order: user override first, then built-in priority. */
+/** Effective fallback order: user override first, then built-in priority. Disabled providers are omitted. */
 export function effectiveFallbackOrder(settings: WebSearchSettings): ProviderName[] {
 	const order: ProviderName[] = [];
 	const candidates = [...(settings.fallbackOrder ?? []), ...PROVIDER_ORDER];
 	for (const name of candidates) {
-		if (isProviderName(name) && !order.includes(name)) order.push(name);
+		if (!isProviderName(name) || order.includes(name)) continue;
+		if (isProviderDisabled(settings.providers, name)) continue;
+		order.push(name);
 	}
 	return order;
 }
@@ -143,13 +171,58 @@ export function pickDefaultProvider(
 	configuredNames: readonly string[],
 ): ProviderName | undefined {
 	const order = effectiveFallbackOrder(settings);
-	if (settings.defaultProvider && isProviderName(settings.defaultProvider)) {
+	const disabled = (name: ProviderName) => isProviderDisabled(settings.providers, name);
+	if (
+		settings.defaultProvider &&
+		isProviderName(settings.defaultProvider) &&
+		!disabled(settings.defaultProvider)
+	) {
 		const configured = configuredNames.includes(settings.defaultProvider);
 		if (configured || settings.defaultProvider === "duckduckgo") {
 			return settings.defaultProvider;
 		}
 	}
-	return order.find((name) => configuredNames.includes(name)) ?? "duckduckgo";
+	const firstConfigured = order.find((name) => configuredNames.includes(name));
+	if (firstConfigured) return firstConfigured;
+	// DuckDuckGo needs no credentials, so it is the last-resort default unless disabled.
+	return disabled("duckduckgo") ? undefined : "duckduckgo";
+}
+
+/** Builds the auto-populated global config template: one entry per provider. */
+function buildConfigTemplate(): Record<string, unknown> {
+	const providers: Record<string, unknown> = {};
+	for (const name of PROVIDER_ORDER) {
+		if (name === "searxng") providers[name] = { enabled: true, baseUrl: "" };
+		else if (name === "duckduckgo") providers[name] = { enabled: true };
+		else providers[name] = { enabled: true, apiKey: "" };
+	}
+	return {
+		_comment:
+			'pi-web-search configuration. Set "enabled": false for a provider to disable it. ' +
+			"Environment variables override apiKey values. Leave defaultProvider as \"auto\" to use the first configured provider.",
+		defaultProvider: "auto",
+		maxResults: 5,
+		fallbackOrder: [],
+		providers,
+	};
+}
+
+/**
+ * Creates the global config file with all providers pre-populated when it does
+ * not exist yet. Existing files are never touched.
+ *
+ * @returns true when the file was created, false when it already existed or could not be written.
+ */
+export function ensureConfigFile(path: string = globalConfigPath()): boolean {
+	try {
+		if (existsSync(path)) return false;
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, `${JSON.stringify(buildConfigTemplate(), null, 2)}\n`, "utf8");
+		return true;
+	} catch {
+		// A read-only or otherwise unavailable path is not fatal: the tool still works with env vars.
+		return false;
+	}
 }
 
 export type { TimeRange };
