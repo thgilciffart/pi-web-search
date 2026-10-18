@@ -3,6 +3,7 @@
  * on transient failures, and error bodies surfaced through ProviderError.
  */
 
+import { setTimeout as delay } from "node:timers/promises";
 import { ProviderError } from "./types.js";
 
 export interface HttpOptions {
@@ -36,8 +37,16 @@ function composeSignal(
 		clearTimeout(timer);
 		signal?.removeEventListener("abort", onAbort);
 	};
-	if (signal) signal.addEventListener("abort", cleanup, { once: true });
 	return { signal: controller.signal, cleanup };
+}
+
+async function waitForRetry(provider: string, signal?: AbortSignal): Promise<void> {
+	try {
+		await delay(1_200, undefined, { signal });
+	} catch (error) {
+		if (signal?.aborted) throw new ProviderError(provider, "request aborted");
+		throw error;
+	}
 }
 
 async function readErrorBody(response: Response): Promise<string> {
@@ -85,21 +94,9 @@ export async function fetchJson<T>(provider: string, options: HttpOptions): Prom
 	let lastError: ProviderError | undefined;
 
 	for (let attempt = 0; attempt < 2; attempt++) {
+		if (signal?.aborted) throw new ProviderError(provider, "request aborted");
 		if (attempt > 0) {
-			// Brief backoff before the single retry; honors the caller signal.
-			await new Promise<void>((resolve, reject) => {
-				const timer = setTimeout(resolve, 1_200);
-				const onAbort = () => {
-					clearTimeout(timer);
-					reject(new ProviderError(provider, "request aborted"));
-				};
-				if (signal?.aborted) {
-					clearTimeout(timer);
-					reject(new ProviderError(provider, "request aborted"));
-					return;
-				}
-				signal?.addEventListener("abort", onAbort, { once: true });
-			});
+			await waitForRetry(provider, signal);
 		}
 
 		const composed = composeSignal(signal, timeoutMs);
@@ -113,6 +110,7 @@ export async function fetchJson<T>(provider: string, options: HttpOptions): Prom
 
 			if (RETRYABLE_STATUS.has(response.status) && attempt === 0) {
 				lastError = new ProviderError(provider, `HTTP ${response.status}`, response.status);
+				await response.body?.cancel();
 				continue;
 			}
 
@@ -123,6 +121,9 @@ export async function fetchJson<T>(provider: string, options: HttpOptions): Prom
 
 			return (await response.json()) as T;
 		} catch (error) {
+			if (composed.signal.aborted) {
+				throw new ProviderError(provider, signal?.aborted ? "request aborted" : `request timed out after ${timeoutMs} ms`);
+			}
 			if (error instanceof ProviderError) {
 				if (error.message === "request aborted") throw error;
 				lastError = error;
@@ -150,10 +151,12 @@ export async function fetchText(provider: string, options: HttpOptions): Promise
 	const { url, method = "GET", headers = {}, body, timeoutMs = DEFAULT_TIMEOUT_MS, signal } = options;
 
 	const initBody = body !== undefined && method === "POST" ? (body as string) : undefined;
+	let lastError: ProviderError | undefined;
 
 	for (let attempt = 0; attempt < 2; attempt++) {
+		if (signal?.aborted) throw new ProviderError(provider, "request aborted");
 		if (attempt > 0) {
-			await new Promise((resolve) => setTimeout(resolve, 1_200));
+			await waitForRetry(provider, signal);
 		}
 		const composed = composeSignal(signal, timeoutMs);
 		try {
@@ -163,15 +166,22 @@ export async function fetchText(provider: string, options: HttpOptions): Promise
 				body: initBody,
 				signal: composed.signal,
 			});
-			if (RETRYABLE_STATUS.has(response.status) && attempt === 0) continue;
+			if (RETRYABLE_STATUS.has(response.status) && attempt === 0) {
+				await response.body?.cancel();
+				continue;
+			}
 			if (!response.ok) {
 				const message = (await readErrorBody(response)) || response.statusText;
 				throw new ProviderError(provider, `HTTP ${response.status}: ${message}`, response.status);
 			}
 			return await response.text();
 		} catch (error) {
+			if (composed.signal.aborted) {
+				throw new ProviderError(provider, signal?.aborted ? "request aborted" : `request timed out after ${timeoutMs} ms`);
+			}
 			if (error instanceof ProviderError) {
 				if (!error.status || !RETRYABLE_STATUS.has(error.status)) throw error;
+				lastError = error;
 				continue;
 			}
 			if (error instanceof Error && error.name === "AbortError") {
@@ -184,5 +194,5 @@ export async function fetchText(provider: string, options: HttpOptions): Promise
 			composed.cleanup();
 		}
 	}
-	throw new ProviderError(provider, "request failed");
+	throw lastError ?? new ProviderError(provider, "request failed");
 }

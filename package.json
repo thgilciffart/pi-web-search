@@ -59,6 +59,7 @@
 		"typescript": "^5.6.0"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
 	}
 }

@@ -110,9 +110,9 @@ function envApiKey(name: ProviderName): string | undefined {
 /**
  * Resolves settings from config files and environment variables.
  * @param cwd project directory checked for .pi/web-search.json
+ * @param globalPath global config path (override for isolated configuration/tests)
  */
-export function resolveSettings(cwd: string = process.cwd()): WebSearchSettings {
-	const globalPath = globalConfigPath();
+export function resolveSettings(cwd: string = process.cwd(), globalPath: string = globalConfigPath()): WebSearchSettings {
 	const projectPath = resolve(cwd, ".pi", "web-search.json");
 
 	const global = readJsonFile(globalPath);
@@ -121,11 +121,15 @@ export function resolveSettings(cwd: string = process.cwd()): WebSearchSettings 
 
 	const merged: Record<string, unknown> = { ...(global ?? {}), ...(project ?? {}) };
 
+	const providerConfigs = normalizeProviderConfigs(global?.providers);
+	const projectProviders = normalizeProviderConfigs(project?.providers);
+	for (const name of PROVIDER_ORDER) {
+		if (projectProviders[name]) {
+			providerConfigs[name] = { ...providerConfigs[name], ...projectProviders[name] };
+		}
+	}
 	const settings: WebSearchSettings = {
-		providers: {
-			...normalizeProviderConfigs(global?.providers),
-			...normalizeProviderConfigs(project?.providers),
-		},
+		providers: providerConfigs,
 		configFiles,
 	};
 
@@ -217,7 +221,7 @@ export function ensureConfigFile(path: string = globalConfigPath()): boolean {
 	try {
 		if (existsSync(path)) return false;
 		mkdirSync(dirname(path), { recursive: true });
-		writeFileSync(path, `${JSON.stringify(buildConfigTemplate(), null, 2)}\n`, "utf8");
+		writeFileSync(path, `${JSON.stringify(buildConfigTemplate(), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
 		return true;
 	} catch {
 		// A read-only or otherwise unavailable path is not fatal: the tool still works with env vars.

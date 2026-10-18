@@ -1,5 +1,5 @@
-import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,9 +7,9 @@ import {
 	effectiveFallbackOrder,
 	ensureConfigFile,
 	pickDefaultProvider,
-	resolveSettings,
+	resolveSettings as resolveConfig,
 } from "../src/config.js";
-import { buildProviders, PROVIDER_ORDER } from "../src/providers/index.js";
+import { buildProviders, PROVIDER_ORDER, PROVIDER_ENV_VARS } from "../src/providers/index.js";
 import { parseDuckDuckGoHtml, unwrapDuckUrl } from "../src/providers/duckduckgo.js";
 import { truncate, decodeHtmlEntities } from "../src/providers/types.js";
 
@@ -29,11 +29,24 @@ function makeProjectDir(config?: Record<string, unknown>): string {
 }
 
 const SAVED_ENV: Record<string, string | undefined> = {};
-const ENV_KEYS = ["TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "SERPER_API_KEY", "SEARXNG_URL", "PARALLEL_API_KEY"];
+const ENV_KEYS = Object.values(PROVIDER_ENV_VARS).flat();
+let globalPath: string;
+
+beforeEach(() => {
+	globalPath = join(makeProjectDir(), "global.json");
+	for (const key of ENV_KEYS) {
+		SAVED_ENV[key] = process.env[key];
+		delete process.env[key];
+	}
+});
+afterEach(restoreEnv);
+
+function resolveSettings(cwd: string) {
+	return resolveConfig(cwd, globalPath);
+}
 
 function withEnv(overrides: Record<string, string | undefined>): void {
 	for (const key of ENV_KEYS) {
-		SAVED_ENV[key] ??= process.env[key];
 		if (key in overrides) {
 			if (overrides[key] === undefined) delete process.env[key];
 			else process.env[key] = overrides[key];
@@ -88,12 +101,31 @@ describe("text helpers", () => {
 });
 
 describe("config resolution", () => {
+	test("project provider options preserve global credentials and disabled flags", () => {
+		writeFileSync(globalPath, JSON.stringify({ providers: {
+			brave: { apiKey: "global-key", enabled: false },
+			exa: { apiKey: "exa-key", type: "auto" },
+		} }));
+		const settings = resolveSettings(makeProjectDir({ providers: {
+			brave: { gl: "au" }, exa: { type: "fast" },
+		} }));
+		expect(settings.providers.brave).toEqual({ apiKey: "global-key", enabled: false, gl: "au" });
+		expect(settings.providers.exa).toEqual({ apiKey: "exa-key", type: "fast" });
+		expect(buildProviders(settings.providers).map((provider) => provider.name)).toEqual(["exa", "duckduckgo"]);
+	});
+
+	test("project credentials override global credentials and env overrides both", () => {
+		writeFileSync(globalPath, JSON.stringify({ providers: { brave: { apiKey: "global-key", enabled: false } } }));
+		const dir = makeProjectDir({ providers: { brave: { apiKey: "project-key", enabled: true } } });
+		expect(resolveSettings(dir).providers.brave).toEqual({ apiKey: "project-key", enabled: true });
+		withEnv({ BRAVE_API_KEY: "env-key" });
+		expect(resolveSettings(dir).providers.brave).toEqual({ apiKey: "env-key", enabled: true });
+	});
 	test("env vars activate providers", () => {
 		withEnv({ TAVILY_API_KEY: "tvly-test", SEARXNG_URL: "http://localhost:8888" });
 		const settings = resolveSettings(makeProjectDir());
 		expect(settings.providers.tavily?.apiKey).toBe("tvly-test");
 		expect(settings.providers.searxng?.baseUrl).toBe("http://localhost:8888");
-		restoreEnv();
 	});
 
 	test("project config file provides keys and defaults", () => {
@@ -109,7 +141,6 @@ describe("config resolution", () => {
 		expect(settings.providers.brave?.apiKey).toBe("brave-key");
 		expect(settings.providers.searxng?.baseUrl).toBe("http://searx:8080");
 		expect(settings.configFiles).toHaveLength(1);
-		restoreEnv();
 	});
 
 	test("invalid config entries are ignored gracefully", () => {
@@ -133,7 +164,6 @@ describe("config resolution", () => {
 		expect(order).toContain("duckduckgo");
 		// Only brave is configured, so it becomes the default.
 		expect(pickDefaultProvider(settings, ["brave", "duckduckgo"])).toBe("brave");
-		restoreEnv();
 	});
 
 	test("enabled: false disables a provider even when a key is present", () => {
@@ -145,7 +175,6 @@ describe("config resolution", () => {
 		expect(settings.providers.tavily?.enabled).toBe(false);
 		expect(disabledProviderNames(settings).has("tavily")).toBe(true);
 		expect(buildProviders(settings.providers).map((p) => p.name)).not.toContain("tavily");
-		restoreEnv();
 	});
 
 	test("disabled providers are excluded from default and fallback selection", () => {
@@ -156,7 +185,6 @@ describe("config resolution", () => {
 		// Tavily would normally win, but brave is now the first usable provider.
 		expect(pickDefaultProvider(settings, ["brave", "duckduckgo"])).toBe("brave");
 		expect(pickDefaultProvider(settings, ["tavily", "brave"])).toBe("brave");
-		restoreEnv();
 	});
 
 	test("duckduckgo can be disabled, leaving no fallback default", () => {
@@ -171,6 +199,7 @@ describe("config resolution", () => {
 		const path = join(dir, "nested", "config.json");
 
 		expect(ensureConfigFile(path)).toBe(true);
+		if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
 		const created = JSON.parse(readFileSync(path, "utf8")) as {
 			providers: Record<string, { enabled?: boolean }>;
 		};

@@ -57,7 +57,9 @@ Set the env var for each provider you want enabled (see table). Env vars overrid
 
 ### Config file
 
-On first run the extension creates `~/.pi/agent/web-search/config.json` with every provider pre-populated, so all options are visible and editable without digging through docs. Existing files are never overwritten. A `.pi/web-search.json` file in the project takes precedence over the global file:
+On first run the extension creates `~/.pi/agent/web-search/config.json` with every provider pre-populated, so all options are visible and editable without digging through docs. Existing files are never overwritten. A `.pi/web-search.json` file in the project takes precedence over the global file.
+
+Provider settings merge field by field: a project can override one option while keeping global credentials and the global `enabled` flag. Newly generated global files are readable and writable only by the owner on systems that support Unix permissions.
 
 ```json
 {
@@ -99,6 +101,7 @@ Parameters:
 Behavior:
 
 - **Retry** — when a call does not name a provider and the default provider fails, the tool retries with the next configured providers. It tries at most three providers in total. The result names the provider that answered.
+- **Cancellation** — aborting a search stops HTTP retry waits and prevents fallback requests to other providers.
 - **Explicit provider** — a named provider disables retry. When the named provider is not configured or is disabled, the result explains how to enable it.
 - **Disabled providers** — a provider with `"enabled": false` is never selected, never used as a fallback, and rejected when named explicitly.
 - **Structured output** — results carry a `structuredContent` payload (`provider`, `query`, `results[]`) for codemode/programmatic callers.

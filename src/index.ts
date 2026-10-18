@@ -181,6 +181,7 @@ export default function (pi: ExtensionAPI) {
 		let fallbackFrom: ProviderName | undefined;
 		const errors: string[] = [];
 		for (const name of chain) {
+			if (signal?.aborted) throw new ProviderError(name, "request aborted");
 			const candidate = providerByName.get(name);
 			if (!candidate) {
 				errors.push(`${name}: not configured`);
@@ -190,6 +191,7 @@ export default function (pi: ExtensionAPI) {
 				const results = await candidate.search(args, signal);
 				return { provider: candidate, results, fallbackFrom };
 			} catch (error) {
+				if (signal?.aborted) throw new ProviderError(name, "request aborted");
 				const message =
 					error instanceof ProviderError
 						? `${name}: ${error.message}`
@@ -347,6 +349,10 @@ export default function (pi: ExtensionAPI) {
 			if (!details) {
 				const text = result.content[0];
 				return new Text(text?.type === "text" ? text.text : "", 0, 0);
+			}
+			if (result.isError) {
+				const text = result.content[0];
+				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Web search failed"), 0, 0);
 			}
 			if (details.resultCount === 0) {
 				return new Text(theme.fg("warning", "No results"), 0, 0);
