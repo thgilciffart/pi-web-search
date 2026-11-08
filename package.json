@@ -1,7 +1,7 @@
 {
 	"name": "@thgilciffart/pi-websearch",
-	"version": "0.2.0",
-	"description": "Web search tool for the pi coding agent — one web_search tool, 10 providers (Tavily, Brave, Serper, Exa, Perplexity, You.com, Parallel, Linkup, SearXNG, DuckDuckGo) with automatic provider fallback. Calls search APIs directly, so a search costs the API price, not model tokens.",
+	"version": "0.2.1",
+	"description": "Web search tool for the pi coding agent with one web_search tool, 10 providers, automatic fallback, and direct API calls, so a search costs the API price, not model tokens.",
 	"type": "module",
 	"license": "MIT",
 	"author": "thgilciffart",
@@ -29,6 +29,9 @@
 		"extensions": [
 			"./src/index.ts"
 		]
+	},
+	"publishConfig": {
+		"access": "public"
 	},
 	"peerDependencies": {
 		"@earendil-works/pi-agent-core": "*",
@@ -60,6 +63,8 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "bun test"
+		"test": "bun test",
+		"check": "npm run typecheck && npm test",
+		"prepublishOnly": "npm run check"
 	}
 }

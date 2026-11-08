@@ -1,6 +1,6 @@
 # pi-websearch
 
-A `web_search` tool for [Pi](https://pi.dev) with automatic provider fallback. Searches call provider APIs directly.
+Web search tool for the [Pi](https://pi.dev) coding agent with one `web_search` tool, 10 providers, automatic fallback, and direct API calls, so a search costs the API price, not model tokens.
 
 ## Install
 
