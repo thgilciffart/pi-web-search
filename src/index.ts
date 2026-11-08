@@ -244,7 +244,7 @@ export default function (pi: ExtensionAPI) {
 						isError: true,
 					};
 				}
-				const envHint = PROVIDER_ENV_VARS[params.provider];
+				const envHint = PROVIDER_ENV_VARS[params.provider as ProviderName];
 				const disabledHint = disabledNames.size
 					? ` Disabled in config: ${[...disabledNames].join(", ")}.`
 					: "";
